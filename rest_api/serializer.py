@@ -1,6 +1,6 @@
 from rest_framework import serializers
-from .models import CustomUser, Profile, Project, Task, Document, Comment
-
+from .models import CustomUser, Profile, Project, Task, Document, Comment, TimelineEvent, Notification
+from django.contrib.auth import authenticate
 
 class ProfileSerializer(serializers.ModelSerializer):
     class Meta:
@@ -41,7 +41,7 @@ class ProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = ['id', 'title', 'description', 'start_date', 'end_date', 'team_members']
-
+    
 
 class TaskSerializer(serializers.ModelSerializer):
     class Meta:
@@ -59,3 +59,34 @@ class CommentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Comment
         fields = ['id', 'text', 'created_at', 'task', 'project']
+
+
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    username = serializers.CharField(required=False)
+    password = serializers.CharField(write_only=True)
+
+    def validate(self, data):
+        email = data.get('email')
+        password = data.get('password')
+        username = data.get('username')
+        print("in login serializer!!!!!")
+        if not email or not password:
+            raise serializers.ValidationError('Email and password are required.')
+
+        user = authenticate(username=username, email=email, password=password)
+        if user is None:
+            raise serializers.ValidationError('Invalid credentials.')
+
+        return {'user': user}
+
+class TimelineEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TimelineEvent
+        fields = '__all__'
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ['id', 'message', 'is_read', 'timestamp']

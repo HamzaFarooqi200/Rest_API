@@ -69,9 +69,33 @@ class Project(models.Model):
         if not self.start_date < self.end_date:
             raise ValidationError("the end date must be greater than start date")
 
-    def save(self):
+    def save(self, *args, **kwargs):
         self.check_date
-        return super().save()
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        if is_new:
+            TimelineEvent.objects.create(
+                event_type='project_created',
+                description=f'Project "{self.title}" created.',
+                project=self,
+                user=self.team_members.first()  # Example: assigning first team member as the user
+            )
+        else:
+            TimelineEvent.objects.create(
+                event_type='project_updated',
+                description=f'Project "{self.title}" updated.',
+                project=self,
+                user=self.team_members.first()  # Example: assigning first team member as the user
+            )
+
+    def delete(self, *args, **kwargs):
+        TimelineEvent.objects.create(
+            event_type='project_deleted',
+            description=f'Project "{self.title}" deleted.',
+            project=self,
+            user=self.team_members.first()  # Example: assigning first team member as the user
+        )
+        super().delete(*args, **kwargs)
 
 
 class Task(models.Model):
@@ -93,6 +117,33 @@ class Task(models.Model):
         CustomUser, related_name="assigned_user", on_delete=models.CASCADE
     )
 
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        if is_new:
+            TimelineEvent.objects.create(
+                event_type='task_created',
+                description=f'Task "{self.title}" created for project "{self.project.title}".',
+                task=self,
+                user=self.assignee
+            )
+        else:
+            TimelineEvent.objects.create(
+                event_type='task_updated',
+                description=f'Task "{self.title}" updated for project "{self.project.title}".',
+                task=self,
+                user=self.assignee
+            )
+
+    def delete(self, *args, **kwargs):
+        TimelineEvent.objects.create(
+            event_type='task_deleted',
+            description=f'Task "{self.title}" deleted from project "{self.project.title}".',
+            task=self,
+            user=self.assignee
+        )
+        super().delete(*args, **kwargs)
+
     def __str__(self) -> str:
         return self.title
 
@@ -105,6 +156,33 @@ class Document(models.Model):
     project = models.ForeignKey(
         Project, related_name="document_project", on_delete=models.CASCADE
     )
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        if is_new:
+            TimelineEvent.objects.create(
+                event_type='document_uploaded',
+                description=f'Document "{self.name}" uploaded for project "{self.project.title}".',
+                document=self,
+                user=self.project.team_members.first()
+            )
+        else:
+            TimelineEvent.objects.create(
+                event_type='document_updated',
+                description=f'Document "{self.name}" updated for project "{self.project.title}".',
+                document=self,
+                user=self.project.team_members.first()
+            )
+
+    def delete(self, *args, **kwargs):
+        TimelineEvent.objects.create(
+            event_type='document_deleted',
+            description=f'Document "{self.name}" deleted from project "{self.project.title}".',
+            document=self,
+            user=self.project.team_members.first()
+        )
+        super().delete(*args, **kwargs)
 
     def __str__(self) -> str:
         return self.name
@@ -123,6 +201,33 @@ class Comment(models.Model):
         Project, related_name="project_comment", on_delete=models.DO_NOTHING
     )
 
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        if is_new:
+            TimelineEvent.objects.create(
+                event_type='comment_created',
+                description=f'Comment by {self.author} on task "{self.task.title}" in project "{self.project.title}": {self.text}',
+                comment=self,
+                user=self.author
+            )
+        else:
+            TimelineEvent.objects.create(
+                event_type='comment_updated',
+                description=f'Comment by {self.author} on task "{self.task.title}" in project "{self.project.title}" updated: {self.text}',
+                comment=self,
+                user=self.author
+            )
+
+    def delete(self, *args, **kwargs):
+        TimelineEvent.objects.create(
+            event_type='comment_deleted',
+            description=f'Comment by {self.author} on task "{self.task.title}" in project "{self.project.title}" deleted.',
+            comment=self,
+            user=self.author
+        )
+        super().delete(*args, **kwargs)
+
     def __str__(self) -> str:
         return str(self.author)
 
@@ -136,3 +241,41 @@ class RateLimit(models.Model):
 
     def __str__(self) -> str:
         return str(self.user)
+    
+class TimelineEvent(models.Model):
+    EVENT_TYPES = [
+        ('task_created', 'Task Created'),
+        ('task_updated', 'Task Updated'),
+        ('task_deleted', 'Task Deleted'),
+        ('document_uploaded', 'Document Uploaded'),
+        ('document_updated', 'Document Updated'),
+        ('document_deleted', 'Document Deleted'),
+        ('comment_added', 'Comment Added'),
+        ('comment_updated', 'Comment Updated'),
+        ('comment_deleted', 'Comment Deleted'),
+        ('project_created', 'Project Created'),
+        ('project_updated', 'Project Updated'),
+        ('project_deleted', 'Project Deleted'),
+    ]
+
+    event_type = models.CharField(max_length=30, choices=EVENT_TYPES)
+    description = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+    project = models.ForeignKey(Project, related_name='timeline_events', on_delete=models.CASCADE, null=True, blank=True)
+    task = models.ForeignKey(Task, related_name='timeline_events', on_delete=models.CASCADE, null=True, blank=True)
+    document = models.ForeignKey(Document, related_name='timeline_events', on_delete=models.CASCADE, null=True, blank=True)
+    comment = models.ForeignKey(Comment, related_name='timeline_events', on_delete=models.CASCADE, null=True, blank=True)
+    user = models.ForeignKey(CustomUser, related_name='timeline_events', on_delete=models.CASCADE)
+
+    def __str__(self):
+        return f"{self.event_type} - {self.timestamp}"
+
+
+class Notification(models.Model):
+    user = models.ForeignKey(CustomUser, related_name='notifications', on_delete=models.CASCADE)
+    message = models.TextField()
+    is_read = models.BooleanField(default=False)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Notification for {self.user.email} - Read: {self.is_read}"
